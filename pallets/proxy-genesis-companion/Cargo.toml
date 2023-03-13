@@ -1,0 +1,34 @@
+[package]
+name = "pallet-proxy-genesis-companion"
+authors = { workspace = true }
+description = "A simple pallet that expands pallet-proxy with a genesis configuration"
+edition = "2021"
+version = "0.1.0"
+
+[dependencies]
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+pallet-proxy = { workspace = true }
+parity-scale-codec = { workspace = true }
+scale-info = { workspace = true, features = [ "derive" ] }
+sp-runtime = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+
+pallet-balances = { workspace = true, features = [ "std" ] }
+sp-core = { workspace = true, features = [ "std" ] }
+sp-io = { workspace = true, features = [ "std" ] }
+
+pallet-evm-precompile-proxy = { workspace = true }
+
+[features]
+default = [ "std" ]
+std = [
+	"frame-support/std",
+	"frame-system/std",
+	"pallet-proxy/std",
+	"scale-info/std",
+	"sp-runtime/std",
+]
+try-runtime = [ "frame-support/try-runtime" ]

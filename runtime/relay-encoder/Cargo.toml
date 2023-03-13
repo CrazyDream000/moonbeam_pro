@@ -1,0 +1,52 @@
+[package]
+name = "moonbeam-relay-encoder"
+authors = { workspace = true }
+edition = "2021"
+homepage = "https://moonbeam.network"
+license = "GPL-3.0-only"
+repository = { workspace = true }
+version = "0.1.0"
+
+[dependencies]
+
+# Moonbeam
+pallet-evm-precompile-relay-encoder = { workspace = true }
+xcm-primitives = { workspace = true }
+
+# Substrate
+frame-system = { workspace = true }
+pallet-staking = { workspace = true }
+parity-scale-codec = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+# Cumulus
+cumulus-primitives-core = { workspace = true }
+
+# Polkadot
+xcm = { workspace = true }
+
+[dev-dependencies]
+frame-support = { workspace = true, features = [ "std" ] }
+pallet-proxy = { workspace = true, features = [ "std" ] }
+pallet-utility = { workspace = true, features = [ "std" ] }
+
+kusama-runtime = { workspace = true }
+polkadot-runtime = { workspace = true }
+polkadot-runtime-parachains = { workspace = true }
+rococo-runtime = { workspace = true }
+westend-runtime = { workspace = true }
+
+[features]
+default = [ "std" ]
+std = [
+	"cumulus-primitives-core/std",
+	"frame-system/std",
+	"pallet-evm-precompile-relay-encoder/std",
+	"pallet-staking/std",
+	"parity-scale-codec/std",
+	"parity-scale-codec/std",
+	"sp-runtime/std",
+	"sp-std/std",
+	"xcm-primitives/std",
+]

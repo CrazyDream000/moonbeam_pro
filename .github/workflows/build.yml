@@ -1,0 +1,621 @@
+name: Build
+
+# Using a single file workflow is the preferred solution for our CI over workflow_runs.
+# 1. It generates only 1 action item in the list making it more readable
+# 2. It includes the PR/Commit text in the action item
+# 3. Artifacts are not available between workflows.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - perm-*
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: set to pull_request number to execute on external pr
+        required: false
+
+jobs:
+  ####### Check files and formatting #######
+
+  set-tags:
+    runs-on: ubuntu-latest
+    outputs:
+      git_branch: ${{ steps.check-git-ref.outputs.git_branch }}
+      git_ref: ${{ steps.check-git-ref.outputs.git_ref }}
+      image_exists: ${{ steps.check-check-docker-image.outputs.image_exists }}
+      sha: ${{ steps.get-sha.outputs.sha }}
+      sha8: ${{ steps.get-sha.outputs.sha8 }}
+      polkadot_repo: ${{ steps.get-sha.outputs.polkadot_repo }}
+      polkadot_commit: ${{ steps.get-sha.outputs.polkadot_commit }}
+    steps:
+      - name: Check git ref
+        id: check-git-ref
+        # if PR
+        # else if manual PR
+        # else (push)
+        run: |
+          if [[ -n "${{ github.event.pull_request.head.sha }}" ]]; then
+            echo ::set-output name=git_branch::$(echo ${GITHUB_HEAD_REF})
+            echo ::set-output name=git_ref::${{ github.event.pull_request.head.sha }}
+          elif [[ -n "${{ github.event.inputs.pull_request }}" ]]; then
+            echo ::set-output name=git_branch::$(echo ${GITHUB_HEAD_REF})
+            echo ::set-output name=git_ref::refs/pull/${{ github.event.inputs.pull_request }}/head
+          else 
+            echo ::set-output name=git_branch::$(echo ${GITHUB_REF#refs/heads/})
+            echo ::set-output name=git_ref::$GITHUB_REF
+          fi
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ steps.check-git-ref.outputs.git_ref }}
+      - name: Get Sha
+        id: get-sha
+        run: |
+          echo ::set-output name=sha::$(git log -1 --format="%H")
+          echo ::set-output name=sha8::$(git log -1 --format="%H" | cut -c1-8)
+          echo ::set-output name=polkadot_repo::$(egrep -o 'https.*/polkadot' Cargo.lock | head -1)
+          echo ::set-output name=polkadot_commit::$(egrep -o '/polkadot.*#([^\"]*)' Cargo.lock | \
+            head -1 | sed 's/.*#//' |  cut -c1-8)
+      - name: Check existing docker image
+        id: check-docker-image
+        run: |
+          TAG=sha-${{ steps.get-sha.outputs.sha8 }}
+          echo ::set-output name=image_exists::$(docker manifest inspect purestake/moonbeam:$TAG > /dev/null && echo "true" || echo "false")
+      - name: Display variables
+        run: |
+          echo git_ref: ${{ steps.check-git-ref.outputs.git_ref }}
+          echo sha: ${{ steps.get-sha.outputs.sha }}
+          echo sha8: ${{ steps.get-sha.outputs.sha8 }}
+          echo image_exists: ${{ steps.check-docker-image.outputs.image_exists }}
+
+  check-copyright:
+    runs-on: ubuntu-latest
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - name: Find un-copyrighted files
+        run: |
+          find . \! -name '*.expanded.rs' -name '*.rs' -exec grep  -H -E -o -c Copyright {} \; | grep ':0' || true
+          FILECOUNT=$(find . \! -name '*.expanded.rs' -name '*.rs' -exec grep  -H -E -o -c Copyright {} \; | grep -c ':0' || true)
+          if [[ $FILECOUNT -eq 0 ]]; then
+            true
+          else
+            false
+          fi
+
+  check-links:
+    runs-on: ubuntu-latest
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+
+  check-editorconfig:
+    name: "Check editorconfig"
+    runs-on: ubuntu-latest
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - name: Setup editorconfig checker
+        run: |
+          ls /tmp/bin/ec-linux-amd64 || \
+          cd /tmp && \
+          wget https://github.com/editorconfig-checker/editorconfig-checker/releases/download/2.5.0/ec-linux-amd64.tar.gz && \
+          tar xvf ec-linux-amd64.tar.gz && \
+          chmod +x bin/ec-linux-amd64
+      - name: Check files
+        run: /tmp/bin/ec-linux-amd64 --exclude "typescript-api\/src\/moon(?:base|beam|river)\/interfaces\/.*\.ts"
+
+  check-prettier:
+    name: "Check with Prettier"
+    runs-on: ubuntu-latest
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - name: Use Node.js 16.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16.x
+      - name: Check with Prettier
+        run: npx prettier --check --ignore-path .prettierignore '**/*.(yml|js|ts|json)'
+
+  check-cargo-toml-format:
+    name: "Check Cargo.toml files format"
+    runs-on: self-hosted
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      # With rustup's nice new toml format, we just need to run rustup show to install the toolchain
+      # https://github.com/actions-rs/toolchain/issues/126#issuecomment-782989659
+      - name: Setup Rust toolchain
+        run: rustup show
+      - name: Check Cargo.toml files format with toml_sort
+        run: ./scripts/check-cargo-toml-files-format.sh
+
+  check-forbid-evm-reentrancy:
+    name: "Check 'forbid-evm-reentrancy'"
+    runs-on: ubuntu-latest
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - name: Setup Rust toolchain
+        run: rustup show
+      - name: Verifies all 'pallet-evm/ethereum' use 'forbid-evm-reentrancy' feature
+        run: ./scripts/check-forbid-evm-reentrancy.sh
+
+  check-rust-fmt:
+    name: "Check with rustfmt"
+    runs-on: ubuntu-latest
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      # With rustup's nice new toml format, we just need to run rustup show to install the toolchain
+      # https://github.com/actions-rs/toolchain/issues/126#issuecomment-782989659
+      - name: Setup Rust toolchain
+        run: rustup show
+      - name: Format code with rustfmt
+        run: cargo fmt -- --check
+
+  ####### Preparing polkadot binary for parachain tests #######
+  ####### For non-official repo, the script will fail if a new version of
+  ####### polkadot needs to be pushed.
+  ####### This job must not be skipped (otherwise the ts-tests are not run)
+
+  prepare-polkadot:
+    runs-on: self-hosted
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - name: Login to DockerHub
+        # The if must stay on this step (because this job must not be skipped)
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Check & build polkadot docker image
+        run: |
+          POLKADOT_REPO=${{ needs.set-tags.outputs.polkadot_repo }}
+          POLKADOT_COMMIT=${{ needs.set-tags.outputs.polkadot_commit }}
+          DOCKER_TAG="purestake/moonbase-relay-testnet:sha-$POLKADOT_COMMIT"
+          POLKADOT_EXISTS=$(docker manifest inspect $DOCKER_TAG > /dev/null && \
+            echo "true" || echo "false")
+          if [[ "$POLKADOT_EXISTS" == "false" ]]; then
+            # $POLKADOT_COMMIT and $POLKADOT_REPO is used to build the relay image
+            ./scripts/build-alphanet-relay-image.sh
+            docker push $DOCKER_TAG
+          fi
+      - name: Check & prepare para-test docker image
+        run: |
+          POLKADOT_REPO=${{ needs.set-tags.outputs.polkadot_repo }}
+          POLKADOT_COMMIT=${{ needs.set-tags.outputs.polkadot_commit }}
+          DOCKER_TAG="purestake/polkadot-para-tests:sha-$POLKADOT_COMMIT"
+          POLKADOT_EXISTS=$(docker manifest inspect $DOCKER_TAG > /dev/null && \
+            echo "true" || echo "false")
+          if [[ "$POLKADOT_EXISTS" == "false" ]]; then
+            mkdir -p build
+            MOONBEAM_DOCKER_TAG="purestake/moonbase-relay-testnet:sha-$POLKADOT_COMMIT"
+            # Clear the dummy container if it wasn't properly cleaned up
+            docker rm -f dummy 2> /dev/null
+            docker create --pull always -ti --name dummy $MOONBEAM_DOCKER_TAG bash
+            docker cp dummy:/usr/local/bin/polkadot build/polkadot
+            docker rm -f dummy
+            docker build . --pull --no-cache -f docker/polkadot-para-tests.Dockerfile \
+              --network=host \
+              --build-arg HOST_UID="$UID" \
+              -t $DOCKER_TAG
+            docker push $DOCKER_TAG
+          fi
+
+  ####### Building and Testing binaries #######
+
+  cargo-clippy:
+    runs-on: self-hosted
+    needs: ["set-tags"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - name: Setup Rust toolchain
+        run: rustup show
+      - name: Clippy
+        run: SKIP_WASM_BUILD=1 env -u RUSTFLAGS cargo clippy
+
+  build:
+    runs-on: self-hosted
+    needs: ["set-tags"]
+    env:
+      CARGO_SCCACHE_COMMIT: bed5571c
+      RUSTFLAGS: "-C opt-level=3 -D warnings"
+      # MOONBEAM_LOG: info
+      # DEBUG: "test*"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - uses: actions/cache@v2
+        with:
+          path: ${{ runner.tool_cache }}/cargo-sccache-${CARGO_SCCACHE_COMMIT}
+          key: ${{ runner.OS }}-sccache-bin-${{ env.CARGO_SCCACHE_COMMIT }}-v1
+
+      # With rustup's nice new toml format, we just need to run rustup show to install the toolchain
+      # https://github.com/actions-rs/toolchain/issues/126#issuecomment-782989659
+      - name: Setup Rust toolchain
+        run: rustup show
+      - name: SCCache
+        run: |
+          # We altered the path to avoid old actions to overwrite it
+          SCCACHE_PATH=${{ runner.tool_cache }}/cargo-sccache-${CARGO_SCCACHE_COMMIT}
+          SCCACHE_BIN=${SCCACHE_PATH}/bin/sccache
+          if [ ! -f $SCCACHE_BIN ]; then
+            cargo install sccache --git https://github.com/purestake/sccache.git --rev $CARGO_SCCACHE_COMMIT --force --no-default-features --features=dist-client --root $SCCACHE_PATH
+          fi
+          ls -la $SCCACHE_BIN
+          ps aux | grep sccache
+          if [[ -z `pgrep sccache` ]]; then
+            chmod +x $SCCACHE_BIN
+            $SCCACHE_BIN --start-server
+          fi
+          $SCCACHE_BIN -s
+          echo "RUSTC_WRAPPER=$SCCACHE_BIN" >> $GITHUB_ENV
+      - name: Build Node
+        run: |
+          env
+          cargo build --release --all
+      - name: Verify node version
+        run: |
+          GIT_COMMIT=`git log -1 --format="%H" | cut -c1-7`
+          MB_VERSION=`./target/release/moonbeam --version`
+          echo "Checking $MB_VERSION contains $GIT_COMMIT"
+          echo "$MB_VERSION" | grep $GIT_COMMIT
+      - name: Unit tests
+        run: |
+          cargo install cargo-expand
+          cargo test --release --all
+
+      # We determine whether there are unmodified Cargo.lock files by:
+      # 1. Asking git for a list of all modified files
+      # 2. Using grep to reduce the list to only Cargo.lock files
+      # 3. Counting the number of lines of output
+      - name: Check Cargo Toml
+        run: |
+          # Make sure git is working, and if not abort early. When git is not working it looks like:
+          # $ git diff-index --name-only HEAD
+          # fatal: not a git repository (or any of the parent directories): .git
+          DIFF_INDEX=$(git diff-index --name-only HEAD)
+          if [[ ${DIFF_INDEX:0:5} == "fatal" ]]; then
+            echo "There was an error with the git checkout. Can't check Cargo.lock file."
+            false
+          fi
+          FILECOUNT=$(echo $DIFF_INDEX | grep Cargo.lock | wc -l)
+          if [[ $FILECOUNT -eq 0 ]]; then
+            echo "All lock files are valid"
+          else
+            echo "The following Cargo.lock files have uncommitted changes"
+            echo $DIFF_INDEX | grep Cargo.lock
+            false
+          fi
+      - name: Ensure benchmarking compiles
+        run: cargo check --release --features=runtime-benchmarks
+      - name: Save moonbeam binary
+        run: |
+          mkdir -p build
+          cp target/release/moonbeam build/moonbeam;
+      - name: Upload binary
+        uses: actions/upload-artifact@v2
+        with:
+          name: moonbeam
+          path: build
+      - name: Save runtime wasm
+        run: |
+          mkdir -p runtimes
+          cp target/release/wbuild/moon*/moon*_runtime.compact.compressed.wasm runtimes/;
+      - name: Upload runtimes
+        uses: actions/upload-artifact@v2
+        with:
+          name: runtimes
+          path: runtimes
+
+  typescript-tests:
+    runs-on: self-hosted
+    needs: ["set-tags", "build", "prepare-polkadot"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - uses: actions/download-artifact@v2
+        with:
+          name: moonbeam
+          path: build
+      - name: Use Node.js 16.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16.x
+      - name: Typescript integration tests (against dev service)
+        run: |
+          chmod uog+x build/moonbeam
+
+          ####  Preparing the repository
+          cd moonbeam-types-bundle
+          npm ci
+          npm run build
+
+          ####  Preparing the typescript api
+          cd ../typescript-api
+          npm ci
+
+          cd ../tests
+          npm ci
+          #### Prepares and copies the typescript generated API to include in the tests
+          npm run setup-typescript-api 
+
+          #### Compile typescript tests into javascript (more stable for Mocha)
+          #### This also better display typescript issues
+          npm run build
+
+          cd ..
+
+          #### Retrieving docker image as base to run tests
+          POLKADOT_REPO=${{ needs.set-tags.outputs.polkadot_repo }}
+          POLKADOT_COMMIT=${{ needs.set-tags.outputs.polkadot_commit }}
+          DOCKER_TAG="purestake/polkadot-para-tests:sha-$POLKADOT_COMMIT"
+
+          CPUS=$(lscpu | egrep '^CPU\(s\)' | grep -o '[0-9]*')
+
+          docker run \
+            -e BINARY_PATH='../build/moonbeam' \
+            -v $(pwd):/moonbeam:z \
+            -u $UID \
+            -w /moonbeam/tests \
+            $DOCKER_TAG \
+              node node_modules/.bin/mocha \
+                --parallel -j $((CPUS / 2)) \
+                --exit \
+                'build/tests/**/test-*.js'
+
+      # We determine whether there are unmodified package-lock.json files by:
+      # 1. Asking git for a list of all modified files
+      # 2. Using grep to reduce the list to only package-lock.json files
+      # 3. Counting the number of lines of output
+      - name: Check package-lock.json
+        run: |
+          # Log npm version to make sure it maches with local version
+          npm -v
+          # Make sure git is working, and if not abort early. When git is not working it looks like:
+          # $ git diff-index --name-only HEAD
+          # fatal: not a git repository (or any of the parent directories): .git
+          DIFF_INDEX=$(git diff-index --name-only HEAD)
+          if [[ ${DIFF_INDEX:0:5} == "fatal" ]]; then
+            echo "There was an error with the git checkout. Can't check package-lock.json file."
+            false
+          fi
+          FILECOUNT=$(echo $DIFF_INDEX | grep package-lock.json | wc -l)
+          if [[ $FILECOUNT -eq 0 ]]; then
+            echo "All package-lock.json files are valid"
+          else
+            git diff --cached
+            echo "The following package-lock.json files have uncommitted changes"
+            echo $DIFF_INDEX | grep package-lock.json
+            false
+          fi
+
+  typescript-tracing-tests:
+    if: github.ref == 'refs/heads/master' || contains(github.event.pull_request.labels.*.name, 'A10-evmtracing')
+    runs-on: self-hosted
+    needs: ["set-tags", "build"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - uses: actions/download-artifact@v2
+        with:
+          name: moonbeam
+          path: build
+      - name: Use Node.js 16.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16.x
+      - name: Get tracing runtimes
+        run: |
+          ./scripts/build-last-tracing-runtime.sh ${{ needs.set-tags.outputs.git_branch }}
+          mkdir -p tests/moonbase-overrides/
+          mv build/wasm/moonbase-runtime-local-substitute-tracing.wasm tests/moonbase-overrides/
+      - name: Typescript tracing tests (against dev service)
+        env:
+          BINARY_PATH: ../build/moonbeam
+          ETHAPI_CMD: --ethapi=txpool,debug,trace
+          FORCE_WASM_EXECUTION: true
+          FORCE_COMPILED_WASM: true
+          WASM_RUNTIME_OVERRIDES: moonbase-overrides
+        run: |
+          chmod uog+x build/moonbeam
+
+          ####  Preparing the repository
+          cd moonbeam-types-bundle
+          npm ci
+          npm run build
+
+          ####  Preparing the typescript api
+          cd ../typescript-api
+          npm ci
+
+          cd ../tests
+          npm ci
+          #### Prepares and copies the typescript generated API to include in the tests
+          npm run setup-typescript-api
+
+          #### Compile typescript tests into javascript (more stable for Mocha)
+          #### This also better display typescript issues
+          npm run build
+
+          #### Run tracing tests with mocha
+          node_modules/.bin/mocha --exit --parallel -j 2 'build/tracing-tests/**/test-*.js'
+
+  typescript-para-tests:
+    runs-on: self-hosted
+    needs: ["set-tags", "build", "prepare-polkadot"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v2
+        with:
+          name: moonbeam
+          path: build
+      - uses: actions/download-artifact@v2
+        with:
+          name: runtimes
+          path: tests/runtimes
+      - name: Retrieve polkadot
+        run: |
+          POLKADOT_COMMIT=${{ needs.set-tags.outputs.polkadot_commit }}
+          DOCKER_TAG="purestake/moonbase-relay-testnet:sha-$POLKADOT_COMMIT"
+          # Clear the dummy container if it wasn't properly cleaned up
+          docker rm -f dummy 2> /dev/null
+          docker create -ti --name dummy $DOCKER_TAG bash
+          docker cp dummy:/usr/local/bin/polkadot build/polkadot
+          docker rm -f dummy
+      - name: Use Node.js 16.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16.x
+      - name: Typescript integration tests (against dev service)
+        env:
+          OVERRIDE_RUNTIME_PATH: ./runtimes
+          BINARY_PATH: ../build/moonbeam
+          MOONBEAM_LOG: info
+          RELAY_BINARY_PATH: ../build/polkadot
+        run: |
+          chmod uog+x build/polkadot
+          chmod uog+x build/moonbeam
+
+          ####  Preparing the repository
+          cd moonbeam-types-bundle
+          npm ci
+          cd ../tests
+          npm ci
+          npm run build
+          cd ..
+
+          POLKADOT_REPO=${{ needs.set-tags.outputs.polkadot_repo }}
+          POLKADOT_COMMIT=${{ needs.set-tags.outputs.polkadot_commit }}
+          DOCKER_TAG="purestake/polkadot-para-tests:sha-$POLKADOT_COMMIT"
+
+          #### Retrieve binary to avoid para-node script to rely on docker
+          mkdir -p build
+          localVersion=$(grep 'spec_version: [0-9]*' runtime/moonbase/src/lib.rs | grep -o '[0-9]*')
+          baseRuntime=$(git tag -l -n 'runtime-[0-9]*' | \
+            cut -d' ' -f 1 | cut -d'-' -f 2 | \
+            sed "1 i ${localVersion}" | \
+            sort -n -r | \
+            uniq | \
+            grep -A1 "${localVersion}" | \
+            tail -1)
+          rev=$(git rev-list -1 runtime-$baseRuntime)
+          sha8=${rev:0:8}
+          dockerImage=purestake/moonbeam:sha-${sha8}
+          binaryPath=build/moonbeam-${sha8}
+          docker create --pull always --name moonbeam-tmp ${dockerImage} && \
+          docker cp moonbeam-tmp:/moonbeam/moonbeam ${binaryPath} && \
+          docker rm moonbeam-tmp
+
+          echo "Running para-tests inside docker: $DOCKER_TAG"
+          docker run \
+            -e OVERRIDE_RUNTIME_PATH='./runtimes' \
+            -e BINARY_PATH='../build/moonbeam' \
+            -e MOONBEAM_LOG='info' \
+            -e RELAY_BINARY_PATH='/binaries/polkadot' \
+            -e RUNTIME_DIRECTORY='/tmp/runtimes' \
+            -e BINARY_DIRECTORY='../build/' \
+            -e SPECS_DIRECTORY='/tmp/specs' \
+            -v $(pwd):/moonbeam:z \
+            -v $(pwd)/${binaryPath}:/binaries/moonbeam:z \
+            -u $UID \
+            -w /moonbeam/tests \
+            $DOCKER_TAG \
+              node node_modules/.bin/mocha --exit 'build/para-tests/**/test-*.js'
+
+  docker-moonbeam:
+    runs-on: ubuntu-latest
+    needs: ["set-tags", "build"]
+    if: ${{ needs.set-tags.outputs.image_exists }} == false && ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.set-tags.outputs.git_ref }}
+      - uses: actions/download-artifact@v2
+        with:
+          name: moonbeam
+          path: build
+      - name: Prepare
+        id: prep
+        run: |
+          DOCKER_IMAGE=purestake/moonbeam
+          TAGS="${DOCKER_IMAGE}:sha-${{ needs.set-tags.outputs.sha8 }}"
+          echo ::set-output name=tags::${TAGS}
+          echo ::set-output name=created::$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: latest
+          driver-opts: |
+            image=moby/buildkit:master
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push moonbeam
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/moonbeam.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.prep.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }}
+            org.opencontainers.image.description=${{ github.event.repository.description }}
+            org.opencontainers.image.url=${{ github.event.repository.html_url }}
+            org.opencontainers.image.source=${{ github.event.repository.clone_url }}
+            org.opencontainers.image.created=${{ steps.prep.outputs.created }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=${{ github.event.repository.license.spdx_id }}

@@ -1,0 +1,86 @@
+[package]
+name = "pallet-ethereum-xcm"
+authors = [ "Parity Technologies <admin@parity.io>" ]
+description = "Xcm Transact compatibility for pallet-etherum."
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/paritytech/frontier/"
+version = "1.0.0-dev"
+
+[package.metadata.docs.rs]
+targets = [ "x86_64-unknown-linux-gnu" ]
+
+[dependencies]
+ethereum = { workspace = true, features = [ "with-codec" ] }
+serde = { workspace = true, optional = true }
+
+# Parity
+ethereum-types = { workspace = true }
+parity-scale-codec = { workspace = true }
+rlp = { workspace = true }
+scale-info = { workspace = true, features = [ "derive" ] }
+
+# Substrate
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+pallet-timestamp = { workspace = true }
+sp-io = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+# Frontier
+fp-ethereum = { workspace = true }
+fp-evm = { workspace = true }
+fp-rpc = { workspace = true }
+fp-self-contained = { workspace = true }
+pallet-evm = { workspace = true, features = [ "forbid-evm-reentrancy" ] }
+xcm-primitives = { workspace = true }
+
+[dev-dependencies]
+pallet-evm-precompile-proxy = { workspace = true }
+
+pallet-ethereum = { workspace = true, features = [ "forbid-evm-reentrancy", "std" ] }
+pallet-evm = { workspace = true, features = [ "forbid-evm-reentrancy", "std" ] }
+pallet-proxy = { workspace = true, features = [ "std" ] }
+
+hex = { workspace = true }
+# Parity
+libsecp256k1 = { workspace = true, features = [ "hmac", "static-context" ] }
+# Substrate FRAME
+pallet-balances = { workspace = true, features = [ "std" ] }
+# Substrate
+sp-core = { workspace = true, features = [ "std" ] }
+
+[features]
+default = [ "std" ]
+std = [
+	"ethereum-types/std",
+	"ethereum/std",
+	# Frontier
+	"fp-ethereum/std",
+	"fp-evm/std",
+	"fp-rpc/std",
+	"fp-self-contained/std",
+	# Substrate FRAME
+	"frame-support/std",
+	"frame-system/std",
+	"pallet-evm/std",
+	"pallet-timestamp/std",
+	# Parity
+	"parity-scale-codec/std",
+	"rlp/std",
+	"scale-info/std",
+	"serde",
+	# Substrate
+	"sp-io/std",
+	"sp-runtime/std",
+	"sp-std/std",
+	"xcm-primitives/std",
+]
+runtime-benchmarks = [
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+	"pallet-evm/runtime-benchmarks",
+	"pallet-timestamp/runtime-benchmarks",
+]
+try-runtime = [ "frame-support/try-runtime" ]

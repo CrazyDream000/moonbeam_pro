@@ -1,0 +1,41 @@
+[package]
+name = "pallet-moonbeam-orbiters"
+authors = { workspace = true }
+description = "FRAME-based pallet for Moonbeam orbiters program."
+edition = "2021"
+version = "0.1.0"
+
+[dependencies]
+log = { workspace = true }
+
+# Substrate
+frame-benchmarking = { workspace = true, optional = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+parity-scale-codec = { workspace = true }
+scale-info = { workspace = true, features = [ "derive" ] }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+# Nimbus
+nimbus-primitives = { workspace = true }
+
+[dev-dependencies]
+pallet-balances = { workspace = true, features = [ "std" ] }
+sp-core = { workspace = true, features = [ "std" ] }
+sp-io = { workspace = true, features = [ "std" ] }
+
+[features]
+default = [ "std" ]
+std = [
+	"frame-benchmarking/std",
+	"frame-support/std",
+	"frame-system/std",
+	"nimbus-primitives/std",
+	"parity-scale-codec/std",
+	"scale-info/std",
+	"sp-runtime/std",
+	"sp-std/std",
+]
+runtime-benchmarks = [ "frame-benchmarking" ]
+try-runtime = [ "frame-support/try-runtime" ]

@@ -1,0 +1,74 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Build & Launch Moonbeam Node (Linux)",
+      "preLaunchTask": "Build Moonbeam (debug symbols)",
+      "program": "${workspaceFolder}/target/release/moonbeam",
+      "args": [
+        "--execution=Native",
+        "--no-telemetry",
+        "--no-prometheus",
+        "--dev",
+        "--sealing=manual",
+        "-linfo",
+        "--port=${dbgconfig:port_p2p}",
+        "--rpc-port=${dbgconfig:port_rpc}",
+        "--ws-port=${dbgconfig:port_ws}",
+        "--tmp"
+      ],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"],
+      "sourceMap": {
+        "/rustc/*": "${dbgconfig:rustc_path}"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Launch Moonbeam Node (Linux)",
+      "program": "${workspaceFolder}/target/release/moonbeam",
+      "args": [
+        "--execution=Native",
+        "--no-telemetry",
+        "--no-prometheus",
+        "--dev",
+        "--sealing=manual",
+        "-linfo",
+        "--port=${dbgconfig:port_p2p}",
+        "--rpc-port=${dbgconfig:port_rpc}",
+        "--ws-port=${dbgconfig:port_ws}",
+        "--tmp"
+      ],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"],
+      "sourceMap": {
+        "/rustc/*": "${dbgconfig:rustc_path}"
+      }
+    },
+    {
+      "cwd": "${workspaceFolder}/tests",
+      "args": [
+        "--timeout",
+        "999999",
+        "--colors",
+        "-r",
+        "ts-node/register",
+        "--inspect-brk",
+        "${file}"
+      ],
+      "env": {
+        "DEBUG": "test:dev-node"
+      },
+      "internalConsoleOptions": "openOnSessionStart",
+      "name": "Mocha Current Opened Test",
+      "program": "${workspaceFolder}/tests/node_modules/mocha/bin/_mocha",
+      "request": "launch",
+      "skipFiles": ["<node_internals>/**"],
+      "type": "pwa-node",
+      "port": 9229
+    }
+  ]
+}
