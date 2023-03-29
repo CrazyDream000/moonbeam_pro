@@ -133,6 +133,7 @@ npm i
 cd ../tests
 npm i
 
+
 # Run integration tests
 npm test
 ```
