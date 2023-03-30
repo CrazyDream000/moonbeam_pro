@@ -33,6 +33,7 @@ docker run --network="host" purestake/moonbeam:v0.31.0 --dev
 For more information, see our detailed instructions to [run a development node](https://docs.moonbeam.network/getting-started/local-node/setting-up-a-node/)
 
 ### Sealing options
+### Options
 
 The command above will start the node in instant seal mode. It creates a block when a transaction arrives, similar to Ganache's auto-mine. You can also choose to author blocks at a regular interval, or control authoring manually through the RPC.
 
